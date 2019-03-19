@@ -14,7 +14,7 @@
 # software, applications, hardware, advanced system engineering and early
 # testbed platforms, in support of the nation's exascale computing imperative.
 
-RAJA_DIR ?= /usr/local/raja
+RAJA_DIR ?= /home/camier1/usr/local/raja
 RAJA_INCFLAGS = -I$(RAJA_DIR)/include
 RAJA_LIBS = -fopenmp $(RAJA_DIR)/lib/libRAJA.a
 RAJA_CXXFLAGS = --expt-extended-lambda -Xcompiler -fopenmp
@@ -66,7 +66,8 @@ PREFIX = ./bin
 INSTALL = /usr/bin/install
 
 # Use the MFEM build directory
-MFEM_DIR = ../../mfem
+#MFEM_DIR = ../../mfem
+MFEM_DIR = /home/camier1/home/mfem/master
 CONFIG_MK = $(MFEM_DIR)/config/config.mk
 TEST_MK = $(MFEM_DIR)/config/test.mk
 # Use the MFEM install directory

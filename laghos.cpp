@@ -56,6 +56,10 @@
 // -m data/cube_522_hex.mesh -pt 521 for 10 / 80 / 640 / 5120 ... tasks.
 // -m data/cube_12_hex.mesh  -pt 322 for 12 / 96 / 768 / 6144 ... tasks.
 
+#include <cfenv>
+#pragma STDC FENV_ACCESS on
+
+#include "laghos_fpe.hpp"
 #include "laghos_solver.hpp"
 #include "laghos_timeinteg.hpp"
 #include <fstream>
@@ -485,6 +489,13 @@ int main(int argc, char *argv[])
    bool last_step = false;
    int steps = 0;
    BlockVector S_old(S);
+   MFEM_FE_CLEAR_EXCEPT;
+   
+   fenv_t fe;
+   if (feholdexcept(&fe)!=0){
+      mfem_error("Could not set FPU to trap no exceptions.");
+   }
+   
    for (int ti = 1; !last_step; ti++)
    {
       if (t + dt >= t_final)
@@ -500,11 +511,28 @@ int main(int argc, char *argv[])
 
       // S is the vector of dofs, t is the current time, and dt is the time step
       // to advance.
+      {
+         if (std::fetestexcept(FE_UNDERFLOW))
+         {
+            printf("\033[39mft\033[m");
+            std::feclearexcept(FE_UNDERFLOW);
+         }
+         MFEM_FE_TEST_EXCEPT;
+      }
       ode_solver->Step(S, t, dt);
+      {
+         if (std::fetestexcept(FE_UNDERFLOW))
+         {
+            printf("\033[39mfT\033[m");
+            std::feclearexcept(FE_UNDERFLOW);
+         }
+         MFEM_FE_TEST_EXCEPT;
+      }      
       steps++;
 
       // Adaptive time step control.
       const double dt_est = oper.GetTimeStepEstimate(S);
+      MFEM_FE_TEST_EXCEPT;
       if (dt_est < dt)
       {
          // Repeat (solve again) with a decreased time step - decrease of the

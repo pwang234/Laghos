@@ -14,6 +14,7 @@
 // software, applications, hardware, advanced system engineering and early
 // testbed platforms, in support of the nation's exascale computing imperative.
 
+#include "laghos_fpe.hpp"
 #include "laghos_solver.hpp"
 
 #ifdef MFEM_USE_MPI
@@ -197,6 +198,7 @@ LagrangianHydroOperator::LagrangianHydroOperator(int size,
    locCG.SetAbsTol(1e-8 * numeric_limits<double>::epsilon());
    locCG.SetMaxIter(200);
    locCG.SetPrintLevel(0);
+   MFEM_FE_TEST_EXCEPT;
 }
 
 void LagrangianHydroOperator::Mult(const Vector &S, Vector &dS_dt) const
@@ -222,6 +224,7 @@ void LagrangianHydroOperator::Mult(const Vector &S, Vector &dS_dt) const
    SolveEnergy(S, v, dS_dt);
 
    quad_data_is_current = false;
+   MFEM_FE_TEST_EXCEPT;
 }
 
 void LagrangianHydroOperator::SolveVelocity(const Vector &S,
@@ -245,6 +248,14 @@ void LagrangianHydroOperator::SolveVelocity(const Vector &S,
       timer.sw_force.Start();
       ForcePA.Mult(one, rhs);
       timer.sw_force.Stop();
+      if (std::fetestexcept(FE_UNDERFLOW))
+      {
+         printf("\033[38mF\033[m");
+#warning SolveVelocity/Mult UNDERFLOW cleared
+         std::feclearexcept(FE_UNDERFLOW);
+      }
+      MFEM_FE_TEST_EXCEPT;
+      
       rhs.Neg();
 
       Operator *cVMassPA;
@@ -266,6 +277,13 @@ void LagrangianHydroOperator::SolveVelocity(const Vector &S,
    {
       timer.sw_force.Start();
       Force.Mult(one, rhs);
+      if (std::fetestexcept(FE_UNDERFLOW))
+      {
+         printf("\033[38mF\033[m");
+#warning SolveVelocity/Mult UNDERFLOW cleared
+         std::feclearexcept(FE_UNDERFLOW);
+      }
+      MFEM_FE_TEST_EXCEPT;
       timer.sw_force.Stop();
       rhs.Neg();
 
@@ -285,6 +303,13 @@ void LagrangianHydroOperator::SolveVelocity(const Vector &S,
       timer.H1cg_iter += cg.GetNumIterations();
       Mv.RecoverFEMSolution(X, rhs, dv);
    }
+   if (std::fetestexcept(FE_UNDERFLOW))
+   {
+      printf("\033[32mv\033[m");
+#warning SolveVelocity UNDERFLOW cleared
+      MFEM_FE_CLEAR_EXCEPT;
+   }
+   MFEM_FE_TEST_EXCEPT;
 }
 
 void LagrangianHydroOperator::SolveEnergy(const Vector &S, const Vector &v,
@@ -319,6 +344,13 @@ void LagrangianHydroOperator::SolveEnergy(const Vector &S, const Vector &v,
       timer.sw_force.Start();
       ForcePA.MultTranspose(v, e_rhs);
       timer.sw_force.Stop();
+      if (std::fetestexcept(FE_UNDERFLOW))
+      {
+         printf("\033[38mf\033[m");
+#warning SolveEnergy/MultTranspose UNDERFLOW cleared
+         std::feclearexcept(FE_UNDERFLOW);
+      }
+      MFEM_FE_TEST_EXCEPT;
 
       if (e_source) { e_rhs += *e_source; }
       for (int z = 0; z < nzones; z++)
@@ -332,12 +364,28 @@ void LagrangianHydroOperator::SolveEnergy(const Vector &S, const Vector &v,
          timer.L2dof_iter += locCG.GetNumIterations() * l2dofs_cnt;
          de.SetSubVector(l2dofs, loc_de);
       }
+      if (std::fetestexcept(FE_UNDERFLOW))
+      {
+         //de.Print();
+         printf("\033[33me\033[m");
+#warning SolveEnergy/de UNDERFLOW cleared
+         std::feclearexcept(FE_UNDERFLOW);
+      }
+      MFEM_FE_TEST_EXCEPT;
    }
    else
    {
       timer.sw_force.Start();
       Force.MultTranspose(v, e_rhs);
       timer.sw_force.Stop();
+      if (std::fetestexcept(FE_UNDERFLOW))
+      {
+         printf("\033[38mf\033[m");
+#warning SolveEnergy/MultTranspose UNDERFLOW cleared
+         std::feclearexcept(FE_UNDERFLOW);
+      }
+      MFEM_FE_TEST_EXCEPT;
+
       if (e_source) { e_rhs += *e_source; }
       for (int z = 0; z < nzones; z++)
       {
@@ -351,6 +399,7 @@ void LagrangianHydroOperator::SolveEnergy(const Vector &S, const Vector &v,
       }
    }
    delete e_source;
+   MFEM_FE_TEST_EXCEPT;
 }
 
 void LagrangianHydroOperator::UpdateMesh(const Vector &S) const
@@ -587,9 +636,16 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
             // not to store the Jacobians for all batched quadrature points.
             const DenseMatrix &Jpr = Jpr_b[z](q);
             CalcInverse(Jpr, Jinv);
+            {
+               if (std::fetestexcept(FE_UNDERFLOW))
+               {
+                  printf("\033[35mJ\033[m");
+                  std::feclearexcept(FE_UNDERFLOW);
+               }
+               MFEM_FE_TEST_EXCEPT;
+            }
             const double detJ = Jpr.Det(), rho = rho_b[z*nqp + q],
                          p = p_b[z*nqp + q], sound_speed = cs_b[z*nqp + q];
-
             stress = 0.0;
             for (int d = 0; d < dim; d++) { stress(d, d) = -p; }
 
@@ -608,6 +664,14 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
                {
                   v.GetVectorGradient(*T, sgrad_v);
                }
+               {
+                  if (std::fetestexcept(FE_UNDERFLOW))
+                  {
+                     printf("\033[35mG\033[m");
+                     std::feclearexcept(FE_UNDERFLOW);
+                  }
+                  MFEM_FE_TEST_EXCEPT;
+               }
                sgrad_v.Symmetrize();
                double eig_val_data[3], eig_vec_data[9];
                if (dim==1)
@@ -616,6 +680,12 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
                   eig_vec_data[0] = 1.;
                }
                else { sgrad_v.CalcEigenvalues(eig_val_data, eig_vec_data); }
+               if (std::fetestexcept(FE_UNDERFLOW))
+               {
+                  printf("\033[35mg\033[m");
+                  std::feclearexcept(FE_UNDERFLOW);
+               }
+               MFEM_FE_TEST_EXCEPT;
                Vector compr_dir(eig_vec_data, dim);
                // Computes the initial->physical transformation Jacobian.
                mfem::Mult(Jpr, quad_data.Jac0inv(z_id*nqp + q), Jpi);
@@ -637,7 +707,22 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
 
                stress.Add(visc_coeff, sgrad_v);
             }
-
+            if (std::fetestexcept(FE_UNDERFLOW))
+            {
+               printf("\033[35mu\033[m");
+               //printf("\n\tvisc_coeff=%.15e", visc_coeff);
+#warning viscosity FE_UNDERFLOW cleared
+               std::feclearexcept(FE_UNDERFLOW);
+            }
+            {
+               if (std::fetestexcept(FE_OVERFLOW))
+               {
+                  printf("\033[35;1m!\033[m");
+                  //std::feclearexcept(FE_OVERFLOW);
+               }
+            }
+            MFEM_FE_TEST_EXCEPT;
+            
             // Time step estimate at the point. Here the more relevant length
             // scale is related to the actual mesh deformation; we use the min
             // singular value of the ref->physical Jacobian. In addition, the
@@ -653,11 +738,41 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
             }
             else
             {
-               quad_data.dt_est = min(quad_data.dt_est, cfl * (1.0 / inv_dt) );
+               if (inv_dt>0)
+                  quad_data.dt_est = min(quad_data.dt_est, cfl * (1.0 / inv_dt) );
             }
+            if (std::fetestexcept(FE_DIVBYZERO))
+            {
+               printf("\033[31mq\033[m");
+               //printf("\n[UpdateQuadratureData] sound_speed=%.16e", sound_speed);
+               //printf("\n[UpdateQuadratureData] visc_coeff=%.16e", visc_coeff);
+               //printf("\n[UpdateQuadratureData] min_detJ=%.16e", min_detJ);
+               fflush(0);
+#warning SolveEnergy UFE_DIVBYZERO cleared
+               std::feclearexcept(FE_DIVBYZERO);
+            }
+            if (std::fetestexcept(FE_OVERFLOW))
+            {
+               printf("\033[37;1m!\033[m"); fflush(0);
+               std::feclearexcept(FE_OVERFLOW);
+            }
+            if (std::fetestexcept(FE_UNDERFLOW))
+            {
+               printf("\033[37m?\033[m"); fflush(0);
+               std::feclearexcept(FE_UNDERFLOW);
+            }
+            MFEM_FE_TEST_EXCEPT;
 
             // Quadrature data for partial assembly of the force operator.
             MultABt(stress, Jinv, stressJiT);
+            if (std::fetestexcept(FE_UNDERFLOW))
+            {
+               printf("\033[37mA\033[m");
+               fflush(0);
+#warning MultABt(stress, Jinv, stressJiT) FE_UNDERFLOW cleared
+               std::feclearexcept(FE_UNDERFLOW);
+            }
+            MFEM_FE_TEST_EXCEPT;
             stressJiT *= integ_rule.IntPoint(q).weight * detJ;
             for (int vd = 0 ; vd < dim; vd++)
             {
@@ -666,9 +781,16 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
                   quad_data.stressJinvT(vd)(z_id*nqp + q, gd) =
                      stressJiT(vd, gd);
                }
+               if (std::fetestexcept(FE_UNDERFLOW))
+               {
+                  printf("\033[37mS\033[m"); fflush(0);
+                  std::feclearexcept(FE_UNDERFLOW);
+               }
             }
+            MFEM_FE_TEST_EXCEPT;
          }
          ++z_id;
+         MFEM_FE_TEST_EXCEPT;
       }
    }
 
@@ -683,6 +805,7 @@ void LagrangianHydroOperator::UpdateQuadratureData(const Vector &S) const
 
    timer.sw_qdata.Stop();
    timer.quad_tstep += nzones;
+   MFEM_FE_TEST_EXCEPT;
 }
 
 void LagrangianHydroOperator::AssembleForceMatrix() const
