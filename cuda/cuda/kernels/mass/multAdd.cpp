@@ -15,6 +15,141 @@
 // testbed platforms, in support of the nation's exascale computing imperative.
 #include "../cuda.hpp"
 
+
+template<const int NUM_DOFS_1D,
+         const int NUM_QUAD_1D> kernel
+void rMassMultAdd2D_v2(const int numElements,
+                    const double* restrict dofToQuad,
+                    const double* restrict dofToQuadD,
+                    const double* restrict quadToDof,
+                    const double* restrict quadToDofD,
+                    const double* restrict oper,
+                    const double* restrict solIn,
+                    double* restrict solOut)
+{
+  const int e = blockIdx.x;
+  __shared__ double sol_xy[NUM_QUAD_1D][NUM_QUAD_1D];
+  __shared__ double temp[NUM_QUAD_1D][NUM_QUAD_1D];
+  
+  sol_xy[threadIdx.y][threadIdx.x] = 0.0;
+  __syncthreads();
+  
+  if (threadIdx.y < NUM_DOFS_1D) {
+    double t = 0;
+    for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+    {
+      t += dofToQuad[ijN(threadIdx.x,dx,NUM_QUAD_1D)]*solIn[ijkN(dx,threadIdx.y,e,NUM_DOFS_1D)];
+    }
+    temp[threadIdx.y][threadIdx.x] = t;
+  }
+  __syncthreads();
+  double t = 0;
+  for (int dy = 0; dy < NUM_DOFS_1D; ++dy) {
+    t += dofToQuad[ijN(threadIdx.y,dy,NUM_QUAD_1D)]*temp[dy][threadIdx.x];
+  }
+  sol_xy[threadIdx.y][threadIdx.x] = t;
+  __syncthreads();
+  
+  sol_xy[threadIdx.y][threadIdx.x] *= oper[ijkN(threadIdx.x,threadIdx.y,e,NUM_QUAD_1D)];
+  __syncthreads();
+
+  if (threadIdx.x < NUM_DOFS_1D)
+  {
+    double t = 0;
+    for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+    {
+      t += quadToDof[ijN(threadIdx.x,qx,NUM_DOFS_1D)] * sol_xy[threadIdx.y][qx];
+    }
+    temp[threadIdx.y][threadIdx.x] = t;
+  }
+  __syncthreads();
+    
+  if (threadIdx.x < NUM_DOFS_1D && threadIdx.y < NUM_DOFS_1D)
+  {
+    double t = 0;
+    for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+    {    
+      t += quadToDof[ijN(threadIdx.y,qy,NUM_DOFS_1D)] * temp[qy][threadIdx.x];        
+    }
+    solOut[ijkN(threadIdx.x,threadIdx.y,e,NUM_DOFS_1D)] = t;
+  }
+  
+}
+
+// template<const int NUM_DOFS_1D,
+//          const int NUM_QUAD_1D> kernel
+// void rMassMultAdd2D_v2(const int numElements,
+//                        const double* restrict dofToQuad,
+//                        const double* restrict dofToQuadD,
+//                        const double* restrict quadToDof,
+//                        const double* restrict quadToDofD,
+//                        const double* restrict oper,
+//                        const double* restrict solIn,
+//                        double* restrict solOut)
+// {
+//    const int e = blockDim.x * blockIdx.x + threadIdx.x;
+//    if (e < numElements)
+//    { 
+//       double sol_xy[NUM_QUAD_1D][NUM_QUAD_1D];
+//       for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+//       {
+//          for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+//          {
+//             sol_xy[qy][qx] = 0.0;
+//          }
+//       }
+//       for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+//       {
+//          double sol_x[NUM_QUAD_1D];
+//          for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+//          {
+//            double t = 0;
+//            for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+//            {
+//               t += dofToQuad[ijN(qx,dx,NUM_QUAD_1D)]*solIn[ijkN(dx,dy,e,NUM_DOFS_1D)];
+//            }
+//            sol_x[qx] = t;
+//          }
+//          for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+//          {
+//             for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+//             {
+//               sol_xy[qy][qx] += dofToQuad[ijN(qy,dy,NUM_QUAD_1D)] * sol_x[qx];
+//             }
+//          }
+//       }
+//       for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+//       {
+//          for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+//          {
+//             sol_xy[qy][qx] *= oper[ijkN(qx,qy,e,NUM_QUAD_1D)];
+//          }
+//       }
+//       for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+//       {
+//          double sol_x[NUM_DOFS_1D];
+//          for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+//          {
+//            double t = 0;
+//            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+//             {
+//                t += quadToDof[ijN(dx,qx,NUM_DOFS_1D)] * sol_xy[qy][qx];
+//             }
+//            sol_x[dx] = t;
+//          }
+//          for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+//          {
+//             for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+//             {
+//               solOut[ijkN(dx,dy,e,NUM_DOFS_1D)] += quadToDof[ijN(dy,qy,NUM_DOFS_1D)] * sol_x[dx];
+//             }
+//          }
+//       }      
+//    }
+// }
+
+
+
 // *****************************************************************************
 template<const int NUM_DOFS_1D,
          const int NUM_QUAD_1D> kernel
@@ -29,7 +164,7 @@ void rMassMultAdd2D(const int numElements,
 {
    const int e = blockDim.x * blockIdx.x + threadIdx.x;
    if (e < numElements)
-   {
+   { 
       double sol_xy[NUM_QUAD_1D][NUM_QUAD_1D];
       for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
       {
@@ -74,22 +209,18 @@ void rMassMultAdd2D(const int numElements,
          double sol_x[NUM_DOFS_1D];
          for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
          {
-            sol_x[dx] = 0.0;
-         }
-         for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
-         {
-            const double s = sol_xy[qy][qx];
-            for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+           double t = 0;
+           for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
             {
-               sol_x[dx] += quadToDof[ijN(dx,qx,NUM_DOFS_1D)] * s;
+               t += quadToDof[ijN(dx,qx,NUM_DOFS_1D)] * sol_xy[qy][qx];
             }
+           sol_x[dx] = t;
          }
          for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
          {
-            const double q2d = quadToDof[ijN(dy,qy,NUM_DOFS_1D)];
             for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
             {
-               solOut[ijkN(dx,dy,e,NUM_DOFS_1D)] += q2d * sol_x[dx];
+              solOut[ijkN(dx,dy,e,NUM_DOFS_1D)] += quadToDof[ijN(dy,qy,NUM_DOFS_1D)] * sol_x[dx];
             }
          }
       }
@@ -227,6 +358,137 @@ void rMassMultAdd3D(const int numElements,
    }
 }
 
+template<const int NUM_DOFS_1D,
+         const int NUM_QUAD_1D> kernel
+void rMassMultAdd3D_v2(const int numElements,
+                    const double* dofToQuad,
+                    const double* dofToQuadD,
+                    const double* quadToDof,
+                    const double* quadToDofD,
+                    const double* oper,
+                    const double* solIn,
+                    double* __restrict solOut)
+{
+   const int e = blockDim.x * blockIdx.x + threadIdx.x;
+   if (e < numElements)
+   {
+      double sol_xyz[NUM_QUAD_1D][NUM_QUAD_1D][NUM_QUAD_1D];
+      for (int qz = 0; qz < NUM_QUAD_1D; ++qz)
+      {
+         for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+         {
+            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+            {
+               sol_xyz[qz][qy][qx] = 0;
+            }
+         }
+      }
+      for (int dz = 0; dz < NUM_DOFS_1D; ++dz)
+      {
+         double sol_xy[NUM_QUAD_1D][NUM_QUAD_1D];
+         for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+         {
+            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+            {
+               sol_xy[qy][qx] = 0;
+            }
+         }
+         for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+         {
+            double sol_x[NUM_QUAD_1D];
+            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+            {
+               sol_x[qx] = 0;
+            }
+            for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+            {
+               const double s = solIn[ijklN(dx,dy,dz,e,NUM_DOFS_1D)];
+               for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+               {
+                  sol_x[qx] += dofToQuad[ijN(qx,dx,NUM_QUAD_1D)] * s;
+               }
+            }
+            for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+            {
+               const double wy = dofToQuad[ijN(qy,dy,NUM_QUAD_1D)];
+               for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+               {
+                  sol_xy[qy][qx] += wy * sol_x[qx];
+               }
+            }
+         }
+         for (int qz = 0; qz < NUM_QUAD_1D; ++qz)
+         {
+            const double wz = dofToQuad[ijN(qz,dz,NUM_QUAD_1D)];
+            for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+            {
+               for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+               {
+                  sol_xyz[qz][qy][qx] += wz * sol_xy[qy][qx];
+               }
+            }
+         }
+      }
+      for (int qz = 0; qz < NUM_QUAD_1D; ++qz)
+      {
+         for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+         {
+            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+            {
+               sol_xyz[qz][qy][qx] *= oper[ijklN(qx,qy,qz,e,NUM_QUAD_1D)];
+            }
+         }
+      }
+      for (int qz = 0; qz < NUM_QUAD_1D; ++qz)
+      {
+         double sol_xy[NUM_DOFS_1D][NUM_DOFS_1D];
+         for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+         {
+            for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+            {
+               sol_xy[dy][dx] = 0;
+            }
+         }
+         for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
+         {
+            double sol_x[NUM_DOFS_1D];
+            for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+            {
+               sol_x[dx] = 0;
+            }
+            for (int qx = 0; qx < NUM_QUAD_1D; ++qx)
+            {
+               const double s = sol_xyz[qz][qy][qx];
+               for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+               {
+                  sol_x[dx] += quadToDof[ijN(dx,qx,NUM_DOFS_1D)] * s;
+               }
+            }
+            for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+            {
+               const double wy = quadToDof[ijN(dy,qy,NUM_DOFS_1D)];
+               for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+               {
+                  sol_xy[dy][dx] += wy * sol_x[dx];
+               }
+            }
+         }
+         for (int dz = 0; dz < NUM_DOFS_1D; ++dz)
+         {
+            const double wz = quadToDof[ijN(dz,qz,NUM_DOFS_1D)];
+            for (int dy = 0; dy < NUM_DOFS_1D; ++dy)
+            {
+               for (int dx = 0; dx < NUM_DOFS_1D; ++dx)
+               {
+                  solOut[ijklN(dx,dy,dz,e,NUM_DOFS_1D)] += wz * sol_xy[dy][dx];
+               }
+            }
+         }
+      }
+   }
+}
+
+
 // *****************************************************************************
 typedef void (*fMassMultAdd)(const int numElements,
                              const double* dofToQuad,
@@ -257,49 +519,66 @@ void rMassMultAdd(const int DIM,
    assert(LOG2(NUM_DOFS_1D-1)<=8);
    assert(LOG2(NUM_QUAD_1D>>1)<=8);
    const unsigned int id = (DIM<<16)|((NUM_DOFS_1D-1)<<8)|(NUM_QUAD_1D>>1);
+   // static std::unordered_map<unsigned int, fMassMultAdd> call =
+   // {
+   //    // 2D
+   //    {0x20001,&rMassMultAdd2D<1,2>},    {0x20101,&rMassMultAdd2D<2,2>},
+   //    {0x20102,&rMassMultAdd2D<2,4>},    {0x20202,&rMassMultAdd2D<3,4>},
+   //    {0x20203,&rMassMultAdd2D<3,6>},    {0x20303,&rMassMultAdd2D<4,6>},
+   //    {0x20304,&rMassMultAdd2D<4,8>},    {0x20404,&rMassMultAdd2D<5,8>},
+   //    {0x20405,&rMassMultAdd2D<5,10>},   {0x20505,&rMassMultAdd2D<6,10>},
+   //    {0x20506,&rMassMultAdd2D<6,12>},   {0x20606,&rMassMultAdd2D<7,12>},
+   //    {0x20607,&rMassMultAdd2D<7,14>},   {0x20707,&rMassMultAdd2D<8,14>},
+   //    {0x20708,&rMassMultAdd2D<8,16>},   {0x20808,&rMassMultAdd2D<9,16>},
+   //    {0x20809,&rMassMultAdd2D<9,18>},   {0x20909,&rMassMultAdd2D<10,18>},
+   //    {0x2090A,&rMassMultAdd2D<10,20>},  {0x20A0A,&rMassMultAdd2D<11,20>},
+   //    {0x20A0B,&rMassMultAdd2D<11,22>},  {0x20B0B,&rMassMultAdd2D<12,22>},
+   //    {0x20B0C,&rMassMultAdd2D<12,24>},  {0x20C0C,&rMassMultAdd2D<13,24>},
+   //    {0x20C0D,&rMassMultAdd2D<13,26>},  {0x20D0D,&rMassMultAdd2D<14,26>},
+   //    {0x20D0E,&rMassMultAdd2D<14,28>},  {0x20E0E,&rMassMultAdd2D<15,28>},
+   //    {0x20E0F,&rMassMultAdd2D<15,30>},  {0x20F0F,&rMassMultAdd2D<16,30>},
+   //    {0x20F10,&rMassMultAdd2D<16,32>},  {0x21010,&rMassMultAdd2D<17,32>},
+   //    // 3D
+   //    {0x30001,&rMassMultAdd3D<1,2>},    {0x30101,&rMassMultAdd3D<2,2>},
+   //    {0x30102,&rMassMultAdd3D<2,4>},    {0x30202,&rMassMultAdd3D<3,4>},
+   //    {0x30203,&rMassMultAdd3D<3,6>},    {0x30303,&rMassMultAdd3D<4,6>},
+   //    {0x30304,&rMassMultAdd3D<4,8>},    {0x30404,&rMassMultAdd3D<5,8>},
+   //    {0x30405,&rMassMultAdd3D<5,10>},   {0x30505,&rMassMultAdd3D<6,10>},
+   //    {0x30506,&rMassMultAdd3D<6,12>},   {0x30606,&rMassMultAdd3D<7,12>},
+   //    {0x30607,&rMassMultAdd3D<7,14>},   {0x30707,&rMassMultAdd3D<8,14>},
+   //    {0x30708,&rMassMultAdd3D<8,16>},   {0x30808,&rMassMultAdd3D<9,16>},
+   //    {0x30809,&rMassMultAdd3D<9,18>},   {0x30909,&rMassMultAdd3D<10,18>},
+   //    {0x3090A,&rMassMultAdd3D<10,20>},  {0x30A0A,&rMassMultAdd3D<11,20>},
+   //    {0x30A0B,&rMassMultAdd3D<11,22>},  {0x30B0B,&rMassMultAdd3D<12,22>},
+   //    {0x30B0C,&rMassMultAdd3D<12,24>},  {0x30C0C,&rMassMultAdd3D<13,24>},
+   //    {0x30C0D,&rMassMultAdd3D<13,26>},  {0x30D0D,&rMassMultAdd3D<14,26>},
+   //    {0x30D0E,&rMassMultAdd3D<14,28>},  {0x30E0E,&rMassMultAdd3D<15,28>},
+   //    {0x30E0F,&rMassMultAdd3D<15,30>},  {0x30F0F,&rMassMultAdd3D<16,30>},
+   //    {0x30F10,&rMassMultAdd3D<16,32>},  {0x31010,&rMassMultAdd3D<17,32>},
+   // };
    static std::unordered_map<unsigned int, fMassMultAdd> call =
    {
-      // 2D
-      {0x20001,&rMassMultAdd2D<1,2>},    {0x20101,&rMassMultAdd2D<2,2>},
-      {0x20102,&rMassMultAdd2D<2,4>},    {0x20202,&rMassMultAdd2D<3,4>},
-      {0x20203,&rMassMultAdd2D<3,6>},    {0x20303,&rMassMultAdd2D<4,6>},
-      {0x20304,&rMassMultAdd2D<4,8>},    {0x20404,&rMassMultAdd2D<5,8>},
-      {0x20405,&rMassMultAdd2D<5,10>},   {0x20505,&rMassMultAdd2D<6,10>},
-      {0x20506,&rMassMultAdd2D<6,12>},   {0x20606,&rMassMultAdd2D<7,12>},
-      {0x20607,&rMassMultAdd2D<7,14>},   {0x20707,&rMassMultAdd2D<8,14>},
-      {0x20708,&rMassMultAdd2D<8,16>},   {0x20808,&rMassMultAdd2D<9,16>},
-      {0x20809,&rMassMultAdd2D<9,18>},   {0x20909,&rMassMultAdd2D<10,18>},
-      {0x2090A,&rMassMultAdd2D<10,20>},  {0x20A0A,&rMassMultAdd2D<11,20>},
-      {0x20A0B,&rMassMultAdd2D<11,22>},  {0x20B0B,&rMassMultAdd2D<12,22>},
-      {0x20B0C,&rMassMultAdd2D<12,24>},  {0x20C0C,&rMassMultAdd2D<13,24>},
-      {0x20C0D,&rMassMultAdd2D<13,26>},  {0x20D0D,&rMassMultAdd2D<14,26>},
-      {0x20D0E,&rMassMultAdd2D<14,28>},  {0x20E0E,&rMassMultAdd2D<15,28>},
-      {0x20E0F,&rMassMultAdd2D<15,30>},  {0x20F0F,&rMassMultAdd2D<16,30>},
-      {0x20F10,&rMassMultAdd2D<16,32>},  {0x21010,&rMassMultAdd2D<17,32>},
-      // 3D
-      {0x30001,&rMassMultAdd3D<1,2>},    {0x30101,&rMassMultAdd3D<2,2>},
-      {0x30102,&rMassMultAdd3D<2,4>},    {0x30202,&rMassMultAdd3D<3,4>},
-      {0x30203,&rMassMultAdd3D<3,6>},    {0x30303,&rMassMultAdd3D<4,6>},
-      {0x30304,&rMassMultAdd3D<4,8>},    {0x30404,&rMassMultAdd3D<5,8>},
-      {0x30405,&rMassMultAdd3D<5,10>},   {0x30505,&rMassMultAdd3D<6,10>},
-      {0x30506,&rMassMultAdd3D<6,12>},   {0x30606,&rMassMultAdd3D<7,12>},
-      {0x30607,&rMassMultAdd3D<7,14>},   {0x30707,&rMassMultAdd3D<8,14>},
-      {0x30708,&rMassMultAdd3D<8,16>},   {0x30808,&rMassMultAdd3D<9,16>},
-      {0x30809,&rMassMultAdd3D<9,18>},   {0x30909,&rMassMultAdd3D<10,18>},
-      {0x3090A,&rMassMultAdd3D<10,20>},  {0x30A0A,&rMassMultAdd3D<11,20>},
-      {0x30A0B,&rMassMultAdd3D<11,22>},  {0x30B0B,&rMassMultAdd3D<12,22>},
-      {0x30B0C,&rMassMultAdd3D<12,24>},  {0x30C0C,&rMassMultAdd3D<13,24>},
-      {0x30C0D,&rMassMultAdd3D<13,26>},  {0x30D0D,&rMassMultAdd3D<14,26>},
-      {0x30D0E,&rMassMultAdd3D<14,28>},  {0x30E0E,&rMassMultAdd3D<15,28>},
-      {0x30E0F,&rMassMultAdd3D<15,30>},  {0x30F0F,&rMassMultAdd3D<16,30>},
-      {0x30F10,&rMassMultAdd3D<16,32>},  {0x31010,&rMassMultAdd3D<17,32>},
-   };
+     {0x20304,&rMassMultAdd2D<4,8>},    {0x20404,&rMassMultAdd2D<5,8>},
+     //{0x30304,&rMassMultAdd3D<4,8>},    {0x30404,&rMassMultAdd3D<5,8>},      
+   };   
+   
    if (!call[id])
    {
       printf("\n[rMassMultAdd] id \033[33m0x%X\033[m ",id);
       fflush(stdout);
    }
    assert(call[id]);
+   static int call_no = 0;
+   if (id == 0x20404) {
+     call_no++;
+     if (call_no == 1) {
+       printf("grid=%d,block=%d,numElements=%d\n", grid, blck, numElements);
+     }
+     int grid = numElements;
+     dim3 block(8,8,1);
+     rMassMultAdd2D_v2<5,8><<<grid,block>>>(numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y);
+   } else
    call0(id,grid,blck,
          numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y);
 }
+ 
