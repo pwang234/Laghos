@@ -17,7 +17,7 @@
 
 
 template<const int NUM_DOFS_1D,
-         const int NUM_QUAD_1D> kernel
+         const int NUM_QUAD_1D, int BLOCKZ> kernel
 void rMassMultAdd2D_v2(const int numElements,
                     const double* restrict dofToQuad,
                     const double* restrict dofToQuadD,
@@ -27,17 +27,18 @@ void rMassMultAdd2D_v2(const int numElements,
                     const double* restrict solIn,
                     double* restrict solOut)
 {
-  const int e = blockIdx.x;
-  __shared__ double buf1[NUM_QUAD_1D][NUM_QUAD_1D];
-  __shared__ double buf2[NUM_QUAD_1D][NUM_QUAD_1D];
+  int e = blockIdx.x*BLOCKZ + threadIdx.z;
+  if (e >= numElements) return;
+  __shared__ double buf1[BLOCKZ][NUM_QUAD_1D][NUM_QUAD_1D];
+  __shared__ double buf2[BLOCKZ][NUM_QUAD_1D][NUM_QUAD_1D];
   __shared__ double matrix[NUM_QUAD_1D][NUM_QUAD_1D];
   double (*sol_x)[NUM_QUAD_1D];
   double (*sol_xy)[NUM_QUAD_1D];
   double (*input)[NUM_QUAD_1D];
 
-  input = buf1;
-  sol_x = buf2;
-  sol_xy = buf1;
+  input = (double (*)[NUM_QUAD_1D])(buf1 + threadIdx.z);
+  sol_x = (double (*)[NUM_QUAD_1D])(buf2 + threadIdx.z);
+  sol_xy = (double (*)[NUM_QUAD_1D])(buf1 + threadIdx.z);
 
   for (int dy = threadIdx.y; dy < NUM_DOFS_1D; dy += blockDim.y)
   {
@@ -46,13 +47,16 @@ void rMassMultAdd2D_v2(const int numElements,
       input[dy][dx] = solIn[ijkN(dx,dy,e,NUM_DOFS_1D)];
     }
   }
-  for (int dx = threadIdx.y; dx < NUM_DOFS_1D; dx += blockDim.y)
+  if (threadIdx.z == 0)
   {
-    for (int qx = threadIdx.x; qx < NUM_QUAD_1D; qx += blockDim.x)
+    for (int dx = threadIdx.y; dx < NUM_DOFS_1D; dx += blockDim.y)
     {
-      matrix[dx][qx] = dofToQuad[ijN(qx,dx,NUM_QUAD_1D)];
+      for (int qx = threadIdx.x; qx < NUM_QUAD_1D; qx += blockDim.x)
+      {
+        matrix[dx][qx] = dofToQuad[ijN(qx,dx,NUM_QUAD_1D)];
+      }
     }
-  }  
+  }
   __syncthreads();
   
   for (int dy = threadIdx.y; dy < NUM_DOFS_1D; dy += blockDim.y)
@@ -87,13 +91,16 @@ void rMassMultAdd2D_v2(const int numElements,
       sol_xy[qy][qx] *= oper[ijkN(qx,qy,e,NUM_QUAD_1D)];
     }
   }
-  for (int qx = threadIdx.y; qx < NUM_QUAD_1D; qx += blockDim.y)
+  if (threadIdx.z == 0)
   {
-    for (int dx = threadIdx.x; dx < NUM_DOFS_1D; dx += blockDim.x)
+    for (int qx = threadIdx.y; qx < NUM_QUAD_1D; qx += blockDim.y)
     {
-      matrix[qx][dx] = quadToDof[ijN(dx,qx,NUM_DOFS_1D)];
+      for (int dx = threadIdx.x; dx < NUM_DOFS_1D; dx += blockDim.x)
+      {
+        matrix[qx][dx] = quadToDof[ijN(dx,qx,NUM_DOFS_1D)];
+      }
     }
-  }  
+  }
   __syncthreads();
 
   for (int qy = threadIdx.y; qy < NUM_QUAD_1D; qy += blockDim.y)  
@@ -117,7 +124,8 @@ void rMassMultAdd2D_v2(const int numElements,
       double t = 0;
       for (int qy = 0; qy < NUM_QUAD_1D; ++qy)
       {    
-        t += quadToDof[ijN(dy,qy,NUM_DOFS_1D)] * sol_x[qy][dx];        
+        // t += quadToDof[ijN(dy,qy,NUM_DOFS_1D)] * sol_x[qy][dx];
+        t += matrix[qy][dy] * sol_x[qy][dx];
       }
       solOut[ijkN(dx,dy,e,NUM_DOFS_1D)] = t;
     }
@@ -736,10 +744,10 @@ void rMassMultAdd(const int DIM,
    {
    //    // 2D
    //    {0x20001,&rMassMultAdd2D<1,2>},    {0x20101,&rMassMultAdd2D<2,2>},
-   //    {0x20102,&rMassMultAdd2D<2,4>},    {0x20202,&rMassMultAdd2D<3,4>},
-   //    {0x20203,&rMassMultAdd2D<3,6>},    {0x20303,&rMassMultAdd2D<4,6>},
-   //    {0x20304,&rMassMultAdd2D<4,8>},    {0x20404,&rMassMultAdd2D<5,8>},
-   //    {0x20405,&rMassMultAdd2D<5,10>},   {0x20505,&rMassMultAdd2D<6,10>},
+      {0x20102,&rMassMultAdd2D<2,4>},    {0x20202,&rMassMultAdd2D<3,4>},
+      {0x20203,&rMassMultAdd2D<3,6>},    {0x20303,&rMassMultAdd2D<4,6>},
+      {0x20304,&rMassMultAdd2D<4,8>},    {0x20404,&rMassMultAdd2D<5,8>},
+      {0x20405,&rMassMultAdd2D<5,10>},   {0x20505,&rMassMultAdd2D<6,10>},
    //    {0x20506,&rMassMultAdd2D<6,12>},   {0x20606,&rMassMultAdd2D<7,12>},
    //    {0x20607,&rMassMultAdd2D<7,14>},   {0x20707,&rMassMultAdd2D<8,14>},
    //    {0x20708,&rMassMultAdd2D<8,16>},   {0x20808,&rMassMultAdd2D<9,16>},
@@ -770,56 +778,40 @@ void rMassMultAdd(const int DIM,
    //    {0x30F10,&rMassMultAdd3D<16,32>},  {0x31010,&rMassMultAdd3D<17,32>},
    };
 
-#define call_3d(d,q) rMassMultAdd3D_v2<d,q><<<grid,blck>>>( \
-     numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y)
+#define call_2d(DOFS,QUAD,BZ) \
+     int grid = numElements/BZ; \
+     dim3 blck(QUAD,QUAD,BZ); \
+     rMassMultAdd2D_v2<DOFS,QUAD,BZ><<<grid,blck>>>                            \
+       (numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y)
+#define call_3d(DOFS,QUAD,BZ)                     \
+   int grid = numElements; \
+   dim3 blck(QUAD,QUAD,BZ); \
+   rMassMultAdd3D_v2<DOFS,QUAD><<<grid,blck>>>                                \
+     (numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y)
    
    static int call_no = 0;
-   int grid = numElements;
-   if (DIM == 2 && NUM_DOFS_1D == 5 && NUM_QUAD_1D == 8)
+   if (DIM == 2)
    {
-     dim3 block(8,8,1);
-     rMassMultAdd2D_v2<5,8><<<grid,block>>>(numElements,dofToQuad,dofToQuadD,quadToDof,quadToDofD,op,x,y);
+     if (NUM_DOFS_1D == 2 && NUM_QUAD_1D == 4) { call_2d(2,4,8); }
+     else if (NUM_DOFS_1D == 3 && NUM_QUAD_1D == 4) { call_2d(3,4,8); }
+     else if (NUM_DOFS_1D == 3 && NUM_QUAD_1D == 6) { call_2d(3,6,6); }
+     else if (NUM_DOFS_1D == 4 && NUM_QUAD_1D == 6) { call_2d(4,6,6); }
+     else if (NUM_DOFS_1D == 4 && NUM_QUAD_1D == 8) { call_2d(4,8,2); }
+     else if (NUM_DOFS_1D == 5 && NUM_QUAD_1D == 8) { call_2d(5,8,2); }
+     else if (NUM_DOFS_1D == 5 && NUM_QUAD_1D == 10) { call_2d(5,10,1); }
+     else if (NUM_DOFS_1D == 6 && NUM_QUAD_1D == 10) { call_2d(6,10,1); }
    }
-   else if (DIM == 3 && NUM_DOFS_1D == 2 && NUM_QUAD_1D == 4)
+   else if (DIM == 3)
    {
-     dim3 blck(4,4,2);
-     call_3d(2,4);
+     if (NUM_DOFS_1D == 2 && NUM_QUAD_1D == 4) { call_3d(2,4,2); }
+     else if (NUM_DOFS_1D == 3 && NUM_QUAD_1D == 4) { call_3d(3,4,4); }
+     else if (NUM_DOFS_1D == 3 && NUM_QUAD_1D == 6) { call_3d(3,6,3); }
+     else if (NUM_DOFS_1D == 4 && NUM_QUAD_1D == 6) { call_3d(4,6,4); }
+     else if (NUM_DOFS_1D == 4 && NUM_QUAD_1D == 8) { call_3d(4,8,2); }
+     else if (NUM_DOFS_1D == 5 && NUM_QUAD_1D == 8) { call_3d(5,8,2); }
+     else if (NUM_DOFS_1D == 5 && NUM_QUAD_1D == 10) { call_3d(5,10,2); }
+     else if (NUM_DOFS_1D == 6 && NUM_QUAD_1D == 10) { call_3d(6,10,2); }
    }
-   else if (DIM == 3 && NUM_DOFS_1D == 3 && NUM_QUAD_1D == 4)
-   {
-     dim3 blck(4,4,4);
-     call_3d(3,4);
-   }
-   else if (DIM == 3 && NUM_DOFS_1D == 3 && NUM_QUAD_1D == 6)
-   {
-     dim3 blck(6,6,3);
-     call_3d(3,6);
-   }
-   else if (DIM == 3 && NUM_DOFS_1D == 4 && NUM_QUAD_1D == 6)
-   {
-     dim3 blck(6,6,4);
-     call_3d(4,6);
-   }   
-   else if (DIM == 3 && NUM_DOFS_1D == 4 && NUM_QUAD_1D == 8)
-   {
-     dim3 blck(8,8,2);
-     call_3d(4,8);
-   }
-   else if (DIM == 3 && NUM_DOFS_1D == 5 && NUM_QUAD_1D == 8)
-   {
-     dim3 blck(8,8,2);
-     call_3d(5,8);
-   }
-   else if (DIM == 3 && NUM_DOFS_1D == 5 && NUM_QUAD_1D == 10)
-   {
-     dim3 blck(10,10,2);
-     call_3d(5,10);
-   }
-   else if (DIM == 3 && NUM_DOFS_1D == 6 && NUM_QUAD_1D == 10)
-   {
-     dim3 blck(10,10,2);
-     call_3d(6,10);
-   }   
    else
    {
      if (!call[id])
